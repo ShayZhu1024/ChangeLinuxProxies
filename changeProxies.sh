@@ -6,7 +6,6 @@
 # Date: 2024-08-01
 # Description:
 ################################
-set -u
 set -e 
 
 RED='\033[31;1m'
@@ -41,12 +40,18 @@ menus=(
     "4  取消http代理环境变量"
     "5  设置apt代理"
     "6  取消apt代理"
+    "7  设置yum代理"
+    "8  取消yum代理"
+    "9  设置docker拉取镜像代理"
+    "10 取消docker拉取镜像代理"
+    "11 设置docker容器内部代理"
+    "12 取消docker容器内部代理"
     "0  退出"
 )
 
 #init proxy address
 init() {
-    echo -e "请输入http代理地址:例如: 10.0.0.1:7890"
+    echo -e "请输入http代理地址:"
     while true; do 
         read -r -p "例如: 10.0.0.1:7890 "  httpProxy
         curl -x $httpProxy --connect-timeout 5  www.google.com  &>/dev/null && { successMessage "代理地址有效"; break;  }  || errorMessage "代理地址无效" 
@@ -57,13 +62,13 @@ init() {
 setGitProxy() {
     git config --global http.proxy $httpProxy
     git config --global https.proxy $httpProxy
-    successMessage "git代理设置成功"
+    (($?==0)) &&  successMessage "git代理设置成功" || errorMessage "git代理设置失败"
 }
 
 unsetGitProxy() {
     git config --global --unset http.proxy
     git config --global --unset https.proxy
-    successMessage "git代理取消成功"
+    (($?==0)) && successMessage "git代理取消成功" || errorMessage "git代理取消失败"
 }
 
 setEnvProxy() {
@@ -71,8 +76,8 @@ setEnvProxy() {
 export http_proxy=http://$httpProxy
 export https_proxy=http://$httpProxy
 EOF
-    successMessage "http代理环境变量设置成功"
-    warnMessage "退出脚本后请重新登录bash才能生效!"
+    (($?==0)) && { successMessage "http代理环境变量设置成功"; warnMessage "退出脚本后请重新登录bash才能生效!"; } \
+     || errorMessage "http代理环境变量设置失败"
 }
 
 unsetEnvProxy() {
@@ -89,8 +94,68 @@ Acquire {
   HTTPS::proxy "http://$httpProxy";
 }
 EOF
+    (($?==0)) && successMessage "apt代理设置成功" || errorMessage "apt代理设置失败"
 }
 
+unsetAptProxy() {
+    rm -rf /etc/apt/apt.conf.d/proxy.conf
+    successMessage "apt代理取消成功"
+}
+
+setYumProxy() {
+    cat >>  /etc/yum.conf <<EOF
+proxy=http://$httpProxy
+EOF
+    (($?==0)) && successMessage "yum代理设置成功" || errorMessage "yum代理设置失败"
+}
+
+unsetYumProxy() {
+    sed -ri  '/^proxy=/d'  /etc/yum.conf
+    successMessage "yum代理取消成功"
+}
+
+setDockerPullProxy() {
+    sudo mkdir -p /etc/systemd/system/docker.service.d
+    cat > /etc/systemd/system/docker.service.d/proxy.conf <<EOF
+[Service]
+Environment="HTTP_PROXY=http://$httpProxy"
+Environment="HTTPS_PROXY=http://$httpProxy"
+EOF
+    sudo systemctl daemon-reload
+    sudo systemctl restart docker
+    systemctl show --property=Environment docker
+    successMessage "docker拉取镜像代理设置成功"
+}
+
+unsetDockerPullProxy() {
+    rm -rf /etc/systemd/system/docker.service.d
+    sudo systemctl daemon-reload
+    sudo systemctl restart docker
+    systemctl show --property=Environment docker
+    successMessage "docker拉取镜像代理取消成功"
+
+}
+
+setDockerInnerProxy() {
+    mkdir  -p  ~/.docker/
+    cat  >  ~/.docker/config.json  <<EOF
+{
+    "proxies": {
+        "default": {
+            "httpProxy": "http://$httpProxy",
+            "httpsProxy": "http://$httpProxy"
+        }
+    }
+}
+EOF
+    successMessage  "docker容器内部代理设置成功"
+}
+
+unsetDockerInnerProxy() {
+    rm -rf  ~/.docker/config.json
+    successMessage "docker容器内部代理取消成功"
+}
+    
 mainProc() {
     local result=""
     read -r -p "请选择: "  result
@@ -112,6 +177,24 @@ mainProc() {
             ;;
         "6")
             unsetAptProxy
+            ;;
+        "7")
+            setYumProxy
+            ;;
+        "8")
+            unsetYumProxy
+            ;;
+        "9")
+            setDockerPullProxy
+            ;;
+        "10")
+            unsetDockerPullProxy
+            ;;
+        "11")
+            setDockerInnerProxy
+            ;;
+        "12")
+            unsetDockerInnerProxy
             ;;
         "0")
             return 1
